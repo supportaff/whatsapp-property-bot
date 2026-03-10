@@ -4,10 +4,12 @@ export type Step =
   | 'start'
   | 'choose_type'
   | 'choose_location'
-  | 'min_budget'
+  | 'choose_budget'       // new: budget shortcut menu
+  | 'min_budget'          // only reached if manual entry chosen
   | 'max_budget'
   | 'show_results'
   | 'choose_visit'
+  | 'reschedule'          // new: reschedule flow
   | 'done';
 
 export interface Session {
@@ -18,15 +20,14 @@ export interface Session {
   maxBudget?: number;
   listings?: Listing[];
   chosenListing?: Listing;
+  confirmedSlot?: string;  // saved so reschedule/cancel can reference it
   phone?: string;
 }
 
 const sessions = new Map<string, Session>();
 
 export function getSession(userId: string): Session {
-  if (!sessions.has(userId)) {
-    sessions.set(userId, { step: 'start' });
-  }
+  if (!sessions.has(userId)) sessions.set(userId, { step: 'start' });
   return sessions.get(userId)!;
 }
 

@@ -12,50 +12,35 @@ export interface ScheduledReminder {
   sent: boolean;
 }
 
-// In-memory reminder store (persists as long as process is running)
-const reminders: ScheduledReminder[] = [];
+const reminders = new Map<string, ScheduledReminder>(); // keyed by userId
 
-// Parse visit slot string into a future Date
 function parseSlotToDate(slot: string): Date {
   const now = new Date();
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
 
-  // Find next Saturday
   const saturday = new Date(now);
-  const daysUntilSat = (6 - now.getDay() + 7) % 7 || 7;
-  saturday.setDate(now.getDate() + daysUntilSat);
+  saturday.setDate(now.getDate() + ((6 - now.getDay() + 7) % 7 || 7));
 
-  // Find next Sunday
   const sunday = new Date(now);
-  const daysUntilSun = (7 - now.getDay()) % 7 || 7;
-  sunday.setDate(now.getDate() + daysUntilSun);
+  sunday.setDate(now.getDate() + ((7 - now.getDay()) % 7 || 7));
 
   const slotMap: Record<string, { date: Date; hour: number; minute: number }> = {
-    'Tomorrow 10:00 AM': { date: tomorrow, hour: 10, minute: 0 },
-    'Tomorrow 3:00 PM':  { date: tomorrow, hour: 15, minute: 0 },
-    'This Saturday 11:00 AM': { date: saturday, hour: 11, minute: 0 },
-    'This Sunday 11:00 AM':   { date: sunday,   hour: 11, minute: 0 },
+    'Tomorrow 10:00 AM':      { date: tomorrow,  hour: 10, minute: 0 },
+    'Tomorrow 3:00 PM':       { date: tomorrow,  hour: 15, minute: 0 },
+    'This Saturday 11:00 AM': { date: saturday,  hour: 11, minute: 0 },
+    'This Sunday 11:00 AM':   { date: sunday,    hour: 11, minute: 0 },
   };
 
   const matched = slotMap[slot];
-  if (!matched) {
-    // fallback: 24 hours from now
-    const fallback = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    return fallback;
-  }
+  if (!matched) return new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-  const visitDate = new Date(matched.date);
-  visitDate.setHours(matched.hour, matched.minute, 0, 0);
-  return visitDate;
+  const d = new Date(matched.date);
+  d.setHours(matched.hour, matched.minute, 0, 0);
+  return d;
 }
 
-// Schedule a reminder for a customer
-export function scheduleReminder(
-  userId: string,
-  listing: Listing,
-  slot: string
-): void {
+export function scheduleReminder(userId: string, listing: Listing, slot: string): void {
   if (!config.remindersEnabled) return;
 
   const visitDateTime = parseSlotToDate(slot);
@@ -63,63 +48,46 @@ export function scheduleReminder(
     visitDateTime.getTime() - config.reminderHoursBefore * 60 * 60 * 1000
   );
 
-  // Only schedule if reminder time is in the future
   if (reminderTime <= new Date()) {
-    console.log(`⚠️ Reminder time already passed for ${userId}, skipping.`);
+    console.log(`\u26a0\ufe0f Reminder time already passed for ${userId}`);
     return;
   }
 
-  reminders.push({
-    userId,
-    listing,
-    slot,
-    visitDateTime,
-    reminderTime,
-    sent: false,
-  });
-
-  console.log(
-    `📅 Reminder scheduled for ${userId} at ${reminderTime.toLocaleString('en-IN')} (${config.reminderHoursBefore}h before visit)`
-  );
+  reminders.set(userId, { userId, listing, slot, visitDateTime, reminderTime, sent: false });
+  console.log(`\ud83d\udcc5 Reminder set for ${userId} at ${reminderTime.toLocaleString('en-IN')}`);
 }
 
-// Start the reminder poller — checks every minute
+// Cancel a reminder (used on reschedule or cancel)
+export function cancelReminder(userId: string): void {
+  if (reminders.has(userId)) {
+    reminders.delete(userId);
+    console.log(`\ud83d\uddd1\ufe0f Reminder cancelled for ${userId}`);
+  }
+}
+
 export function startReminderPoller(client: Client): void {
   if (!config.remindersEnabled) {
-    console.log('🔕 Reminders are disabled (REMINDERS_ENABLED=false)');
+    console.log('\ud83d\udd15 Reminders disabled');
     return;
   }
-
-  console.log('⏰ Reminder poller started (checks every 60 seconds)');
+  console.log('\u23f0 Reminder poller started (every 60s)');
 
   setInterval(async () => {
     const now = new Date();
-
-    for (const reminder of reminders) {
+    for (const [userId, reminder] of reminders.entries()) {
       if (!reminder.sent && now >= reminder.reminderTime) {
         try {
-          await client.sendMessage(
-            reminder.userId,
-            msg.visitReminder(reminder.listing, reminder.slot)
-          );
+          await client.sendMessage(userId, msg.visitReminder(reminder.listing, reminder.slot));
           reminder.sent = true;
-          console.log(`✅ Reminder sent to ${reminder.userId}`);
+          console.log(`\u2705 Reminder sent to ${userId}`);
         } catch (err) {
-          console.error(`❌ Failed to send reminder to ${reminder.userId}:`, err);
+          console.error(`\u274c Reminder failed for ${userId}:`, err);
         }
       }
+      // Clean up sent reminders older than 48h
+      if (reminder.sent && now.getTime() - reminder.visitDateTime.getTime() > 48 * 60 * 60 * 1000) {
+        reminders.delete(userId);
+      }
     }
-
-    // Clean up sent reminders older than 48 hours
-    const cutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-    const before = reminders.length;
-    reminders.splice(
-      0,
-      reminders.length,
-      ...reminders.filter((r) => !r.sent || r.visitDateTime > cutoff)
-    );
-    if (reminders.length < before) {
-      console.log(`🧹 Cleaned up ${before - reminders.length} old reminders`);
-    }
-  }, 60 * 1000); // every 60 seconds
+  }, 60 * 1000);
 }

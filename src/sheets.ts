@@ -18,6 +18,7 @@ export interface Listing {
   details: string;
   agentName: string;
   agentNumber: string;
+  imageUrl: string; // Google Drive direct download URL (column I)
 }
 
 export interface Lead {
@@ -32,7 +33,26 @@ export interface Lead {
   timestamp: string;
 }
 
-// Fetch listings filtered by type, location, and budget
+/**
+ * Convert any Google Drive share link to a direct downloadable image URL.
+ * Supports:
+ *   https://drive.google.com/file/d/FILE_ID/view
+ *   https://drive.google.com/open?id=FILE_ID
+ *   https://drive.google.com/uc?id=FILE_ID  (already direct)
+ */
+export function toDriveDirectUrl(url: string): string {
+  if (!url) return '';
+  // Already a direct download link
+  if (url.includes('uc?export=download') || url.includes('uc?id=')) return url;
+  // /file/d/FILE_ID/view  or  /file/d/FILE_ID/
+  const fileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileMatch) return `https://drive.google.com/uc?export=download&id=${fileMatch[1]}`;
+  // ?id=FILE_ID
+  const idMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idMatch) return `https://drive.google.com/uc?export=download&id=${idMatch[1]}`;
+  return url;
+}
+
 export async function fetchListings(
   type: string,
   location: string,
@@ -44,7 +64,7 @@ export async function fetchListings(
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: config.sheetId,
-    range: `${config.listingsTab}!A2:H1000`,
+    range: `${config.listingsTab}!A2:I1000`, // now reads column I for image
   });
 
   const rows = response.data.values || [];
@@ -69,10 +89,10 @@ export async function fetchListings(
       details: row[5] || '',
       agentName: row[6] || '',
       agentNumber: row[7] || config.defaultAgentNumber,
+      imageUrl: toDriveDirectUrl(row[8] || ''), // column I
     }));
 }
 
-// Save lead to Google Sheet Leads tab
 export async function saveLead(lead: Lead): Promise<void> {
   const auth = getAuth();
   const sheets = google.sheets({ version: 'v4', auth });
