@@ -1,5 +1,6 @@
 import { Client, LocalAuth, Message, MessageMedia } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
+import axios from 'axios';
 import { fetchListings, saveLead, Listing } from './sheets';
 import { getSession, setSession, clearSession } from './session';
 import { msg, visitSlots, budgetShortcuts, getLocationMap, getTypeMap } from './messages';
@@ -25,6 +26,34 @@ client.on('auth_failure', () =>
   console.error('\u274c Auth failed. Delete .wwebjs_auth and retry.')
 );
 
+// ── Download image as base64 via axios (works with Google Drive) ────────
+async function downloadImageAsMedia(url: string): Promise<MessageMedia | null> {
+  try {
+    const response = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      maxRedirects: 5,
+    });
+
+    const contentType = (response.headers['content-type'] || 'image/jpeg').split(';')[0].trim();
+    const data = Buffer.from(response.data).toString('base64');
+
+    // Only accept actual image content types
+    if (!contentType.startsWith('image/') && !contentType.startsWith('application/octet')) {
+      console.error(`Unexpected content-type: ${contentType}`);
+      return null;
+    }
+
+    return new MessageMedia(contentType, data);
+  } catch (err) {
+    console.error('Image download failed:', err);
+    return null;
+  }
+}
+
 // ── Helper: send listing cards with images ──────────────────────────────
 async function sendListingsWithImages(
   message: Message,
@@ -35,18 +64,17 @@ async function sendListingsWithImages(
   for (let i = 0; i < listings.length; i++) {
     const item = listings[i];
 
+    // Send text card
     await client.sendMessage(message.from, msg.listingCard(item, i));
 
+    // Send image
     if (item.imageUrl) {
-      try {
-        const media = await MessageMedia.fromUrl(item.imageUrl, {
-          unsafeMime: true,
-        });
+      const media = await downloadImageAsMedia(item.imageUrl);
+      if (media) {
         await client.sendMessage(message.from, media, {
           caption: `\ud83d\udcf8 Photo: ${item.title}`,
         });
-      } catch (err) {
-        console.error(`Image load failed for listing ${item.id}:`, err);
+      } else {
         await client.sendMessage(message.from, msg.noImageAvailable(i));
       }
     }
