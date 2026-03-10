@@ -1,6 +1,6 @@
 import { Client, LocalAuth, Message, MessageMedia } from 'whatsapp-web.js';
-import qrcode from 'qrcode-terminal';
-import { fetchListings, saveLead } from './sheets';
+import * as qrcode from 'qrcode-terminal';
+import { fetchListings, saveLead, Listing } from './sheets';
 import { getSession, setSession, clearSession } from './session';
 import { msg, visitSlots, budgetShortcuts, getLocationMap, getTypeMap } from './messages';
 import { config } from './config';
@@ -28,19 +28,15 @@ client.on('auth_failure', () =>
 // ── Helper: send listing cards with images ──────────────────────────────
 async function sendListingsWithImages(
   message: Message,
-  listings: typeof ([] as import('./sheets').Listing[])
-) {
-  // 1. Send results header
+  listings: Listing[]
+): Promise<void> {
   await message.reply(msg.resultsHeader(listings.length));
 
-  // 2. For each listing: send text card + image
   for (let i = 0; i < listings.length; i++) {
     const item = listings[i];
 
-    // Send text card
     await client.sendMessage(message.from, msg.listingCard(item, i));
 
-    // Send image if available
     if (item.imageUrl) {
       try {
         const media = await MessageMedia.fromUrl(item.imageUrl, {
@@ -56,7 +52,6 @@ async function sendListingsWithImages(
     }
   }
 
-  // 3. Send footer with visit prompt
   await client.sendMessage(message.from, msg.resultsFooter(listings.length));
 }
 
@@ -72,21 +67,18 @@ client.on('message', async (message: Message) => {
   const typeMap = getTypeMap();
 
   try {
-    // ── Global: reschedule trigger (any time after a visit is booked) ─
+    // ── Global: reschedule ──────────────────────────────────────────
     if (lower === 'reschedule' && session.chosenListing && session.confirmedSlot) {
       setSession(userId, { step: 'reschedule' });
       await message.reply(msg.askRescheduleSlot());
       return;
     }
 
-    // ── Global: cancel trigger ──────────────────────────────────
+    // ── Global: cancel ──────────────────────────────────────────────
     if (lower === 'cancel' && session.chosenListing && session.confirmedSlot) {
       const listing = session.chosenListing;
       const oldSlot = session.confirmedSlot;
-
       await message.reply(msg.cancelConfirmed(listing));
-
-      // Notify agent
       const agentNumber = listing.agentNumber || config.defaultAgentNumber;
       if (agentNumber) {
         await client.sendMessage(
@@ -94,13 +86,12 @@ client.on('message', async (message: Message) => {
           msg.agentCancel(userId.replace('@c.us', ''), listing, oldSlot)
         );
       }
-
       cancelReminder(userId);
       clearSession(userId);
       return;
     }
 
-    // ── Restart triggers ─────────────────────────────────────────
+    // ── Restart ─────────────────────────────────────────────────────
     if (['hi', 'hello', 'start', 'hey'].includes(lower)) {
       clearSession(userId);
       setSession(userId, { step: 'choose_type', phone: userId });
@@ -108,16 +99,13 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: reschedule ───────────────────────────────────────
+    // ── STEP: reschedule ────────────────────────────────────────
     if (session.step === 'reschedule') {
       const newSlot = visitSlots[text];
       if (!newSlot) { await message.reply(msg.invalidInput()); return; }
-
       const listing = session.chosenListing!;
       const oldSlot = session.confirmedSlot!;
-
       await message.reply(msg.rescheduleConfirmed(listing, newSlot));
-
       const agentNumber = listing.agentNumber || config.defaultAgentNumber;
       if (agentNumber) {
         await client.sendMessage(
@@ -125,11 +113,8 @@ client.on('message', async (message: Message) => {
           msg.agentReschedule(userId.replace('@c.us', ''), listing, oldSlot, newSlot)
         );
       }
-
-      // Cancel old reminder, schedule new one
       cancelReminder(userId);
       scheduleReminder(userId, listing, newSlot);
-
       setSession(userId, { confirmedSlot: newSlot, step: 'done' });
       return;
     }
@@ -152,7 +137,7 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: choose_budget (shortcut menu) ──────────────────────
+    // ── STEP: choose_budget ─────────────────────────────────────
     if (session.step === 'choose_budget') {
       const shortcut = budgetShortcuts[text];
       if (!shortcut) { await message.reply(msg.invalidInput()); return; }
@@ -161,18 +146,9 @@ client.on('message', async (message: Message) => {
         setSession(userId, { step: 'min_budget' });
         await message.reply(msg.askMinBudget());
       } else {
-        setSession(userId, {
-          step: 'max_budget', // jump straight to fetching
-          minBudget: shortcut.min,
-          maxBudget: shortcut.max,
-        });
+        setSession(userId, { step: 'max_budget', minBudget: shortcut.min, maxBudget: shortcut.max });
         await message.reply(msg.searching());
-        const listings = await fetchListings(
-          session.type!,
-          session.location!,
-          shortcut.min,
-          shortcut.max
-        );
+        const listings = await fetchListings(session.type!, session.location!, shortcut.min, shortcut.max);
         if (listings.length === 0) {
           await message.reply(msg.noResults(shortcut.min, shortcut.max));
           clearSession(userId);
@@ -184,7 +160,7 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: min_budget (manual) ───────────────────────────────
+    // ── STEP: min_budget ─────────────────────────────────────────
     if (session.step === 'min_budget') {
       const amount = parseInt(text.replace(/[^0-9]/g, ''));
       if (isNaN(amount) || amount < 0) {
@@ -196,7 +172,7 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: max_budget (manual) → Fetch results ─────────────────
+    // ── STEP: max_budget ─────────────────────────────────────────
     if (session.step === 'max_budget') {
       const maxBudget = parseInt(text.replace(/[^0-9]/g, ''));
       if (isNaN(maxBudget) || maxBudget <= 0) {
@@ -208,9 +184,7 @@ client.on('message', async (message: Message) => {
         return;
       }
       await message.reply(msg.searching());
-      const listings = await fetchListings(
-        session.type!, session.location!, session.minBudget!, maxBudget
-      );
+      const listings = await fetchListings(session.type!, session.location!, session.minBudget!, maxBudget);
       setSession(userId, { maxBudget });
       if (listings.length === 0) {
         await message.reply(msg.noResults(session.minBudget!, maxBudget));
@@ -222,7 +196,7 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: show_results → Customer picks listing ───────────────
+    // ── STEP: show_results ────────────────────────────────────────
     if (session.step === 'show_results') {
       const index = parseInt(text) - 1;
       const listings = session.listings || [];
@@ -235,16 +209,13 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: choose_visit → Confirm + Notify + Schedule reminder ─
+    // ── STEP: choose_visit ───────────────────────────────────────
     if (session.step === 'choose_visit') {
       const slot = visitSlots[text];
       if (!slot) { await message.reply(msg.invalidInput()); return; }
-
       const listing = session.chosenListing!;
       const budget = `\u20b9${session.minBudget?.toLocaleString()} \u2013 \u20b9${session.maxBudget?.toLocaleString()}`;
-
       await message.reply(msg.visitConfirmed(listing, slot));
-
       await saveLead({
         customerName: 'WhatsApp Customer',
         phone: userId.replace('@c.us', ''),
@@ -256,18 +227,11 @@ client.on('message', async (message: Message) => {
         visitDate: slot,
         timestamp: new Date().toLocaleString('en-IN'),
       });
-
       const agentNumber = listing.agentNumber || config.defaultAgentNumber;
       if (agentNumber) {
-        await client.sendMessage(
-          agentNumber,
-          msg.agentAlert(userId.replace('@c.us', ''), listing, slot, budget)
-        );
+        await client.sendMessage(agentNumber, msg.agentAlert(userId.replace('@c.us', ''), listing, slot, budget));
       }
-
       scheduleReminder(userId, listing, slot);
-
-      // Keep session alive for reschedule/cancel (don't clearSession)
       setSession(userId, { confirmedSlot: slot, step: 'done' });
       return;
     }
