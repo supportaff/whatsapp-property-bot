@@ -18,7 +18,7 @@ export interface Listing {
   details: string;
   agentName: string;
   agentNumber: string;
-  imageUrl: string; // Google Drive direct download URL (column I)
+  imageUrl: string;
 }
 
 export interface Lead {
@@ -35,19 +35,12 @@ export interface Lead {
 
 /**
  * Convert any Google Drive share link to a direct downloadable image URL.
- * Supports:
- *   https://drive.google.com/file/d/FILE_ID/view
- *   https://drive.google.com/open?id=FILE_ID
- *   https://drive.google.com/uc?id=FILE_ID  (already direct)
  */
 export function toDriveDirectUrl(url: string): string {
   if (!url) return '';
-  // Already a direct download link
   if (url.includes('uc?export=download') || url.includes('uc?id=')) return url;
-  // /file/d/FILE_ID/view  or  /file/d/FILE_ID/
   const fileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (fileMatch) return `https://drive.google.com/uc?export=download&id=${fileMatch[1]}`;
-  // ?id=FILE_ID
   const idMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (idMatch) return `https://drive.google.com/uc?export=download&id=${idMatch[1]}`;
   return url;
@@ -64,19 +57,28 @@ export async function fetchListings(
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: config.sheetId,
-    range: `${config.listingsTab}!A2:I1000`, // now reads column I for image
+    range: `${config.listingsTab}!A2:I1000`,
   });
 
   const rows = response.data.values || [];
 
   return rows
     .filter((row) => {
-      const rowType = (row[1] || '').toLowerCase();
-      const rowLocation = (row[3] || '').toLowerCase();
-      const price = parseInt(row[4]);
-      const typeMatch = rowType.includes(type.toLowerCase());
-      const locationMatch = location === 'any' || rowLocation.includes(location.toLowerCase());
-      const budgetMatch = price >= minBudget && price <= maxBudget;
+      const rowType     = (row[1] || '').toLowerCase().trim();
+      const rowLocation = (row[3] || '').toLowerCase().trim();
+      const price       = parseInt(row[4]);
+
+      // Type: partial match (e.g. "real estate" matches "real estate / villa")
+      const typeMatch = rowType.includes(type.toLowerCase().trim());
+
+      // Location: EXACT match against what the agent typed in the sheet,
+      // OR 'any' means skip the location filter entirely
+      const locationMatch =
+        location === 'any' ||
+        rowLocation === location.toLowerCase().trim();
+
+      const budgetMatch = !isNaN(price) && price >= minBudget && price <= maxBudget;
+
       return typeMatch && locationMatch && budgetMatch;
     })
     .slice(0, config.maxResults)
@@ -89,7 +91,7 @@ export async function fetchListings(
       details: row[5] || '',
       agentName: row[6] || '',
       agentNumber: row[7] || config.defaultAgentNumber,
-      imageUrl: toDriveDirectUrl(row[8] || ''), // column I
+      imageUrl: toDriveDirectUrl(row[8] || ''),
     }));
 }
 
