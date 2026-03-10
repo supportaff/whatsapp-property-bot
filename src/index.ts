@@ -2,8 +2,9 @@ import { Client, LocalAuth, Message } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { fetchListings, saveLead } from './sheets';
 import { getSession, setSession, clearSession } from './session';
-import { msg, visitSlots, locationMap, typeMap } from './messages';
+import { msg, visitSlots, getLocationMap, getTypeMap } from './messages';
 import { config } from './config';
+import { scheduleReminder, startReminderPoller } from './reminder';
 
 const client = new Client({
   authStrategy: new LocalAuth(),
@@ -13,20 +14,20 @@ const client = new Client({
 });
 
 client.on('qr', (qr: string) => {
-  console.log('\n📱 Scan this QR code with WhatsApp:\n');
+  console.log('\n\ud83d\udcf1 Scan this QR code with WhatsApp:\n');
   qrcode.generate(qr, { small: true });
 });
 
 client.on('ready', () => {
-  console.log(`✅ ${config.businessName} WhatsApp Bot is ready!`);
+  console.log(`\u2705 ${config.businessName} WhatsApp Bot is ready!`);
+  startReminderPoller(client);
 });
 
 client.on('auth_failure', () => {
-  console.error('❌ Authentication failed. Delete .wwebjs_auth and try again.');
+  console.error('\u274c Authentication failed. Delete .wwebjs_auth and try again.');
 });
 
 client.on('message', async (message: Message) => {
-  // Ignore group messages
   if (message.from.includes('@g.us')) return;
 
   const userId = message.from;
@@ -34,8 +35,11 @@ client.on('message', async (message: Message) => {
   const lower = text.toLowerCase();
   const session = getSession(userId);
 
+  const locationMap = getLocationMap();
+  const typeMap = getTypeMap();
+
   try {
-    // ── Restart triggers ──────────────────────────────
+    // ── Restart triggers ────────────────────────────────────────────
     if (['hi', 'hello', 'start', 'hey'].includes(lower)) {
       clearSession(userId);
       setSession(userId, { step: 'choose_type', phone: userId });
@@ -43,7 +47,7 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: choose_type ─────────────────────────────
+    // ── STEP: choose_type ─────────────────────────────────────────
     if (session.step === 'choose_type') {
       const type = typeMap[text];
       if (!type) { await message.reply(msg.invalidInput()); return; }
@@ -52,7 +56,7 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: choose_location ─────────────────────────
+    // ── STEP: choose_location ────────────────────────────────────
     if (session.step === 'choose_location') {
       const location = locationMap[text];
       if (!location) { await message.reply(msg.invalidInput()); return; }
@@ -61,21 +65,27 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: min_budget ──────────────────────────────
+    // ── STEP: min_budget ──────────────────────────────────────────
     if (session.step === 'min_budget') {
       const amount = parseInt(text.replace(/[^0-9]/g, ''));
-      if (isNaN(amount) || amount <= 0) { await message.reply('Please enter a valid number like *500000*'); return; }
+      if (isNaN(amount) || amount <= 0) {
+        await message.reply('Please enter a valid number like *500000*');
+        return;
+      }
       setSession(userId, { step: 'max_budget', minBudget: amount });
       await message.reply(msg.askMaxBudget());
       return;
     }
 
-    // ── STEP: max_budget → Fetch results ──────────────
+    // ── STEP: max_budget → Fetch results ──────────────────────────
     if (session.step === 'max_budget') {
       const maxBudget = parseInt(text.replace(/[^0-9]/g, ''));
-      if (isNaN(maxBudget) || maxBudget <= 0) { await message.reply('Please enter a valid number'); return; }
+      if (isNaN(maxBudget) || maxBudget <= 0) {
+        await message.reply('Please enter a valid number');
+        return;
+      }
       if (maxBudget <= (session.minBudget || 0)) {
-        await message.reply('⚠️ Max budget must be greater than min budget. Please enter again.');
+        await message.reply('\u26a0\ufe0f Max budget must be greater than min. Please enter again.');
         return;
       }
 
@@ -101,29 +111,26 @@ client.on('message', async (message: Message) => {
       return;
     }
 
-    // ── STEP: show_results → Customer picks one ───────
+    // ── STEP: show_results → Customer picks listing ───────────────
     if (session.step === 'show_results') {
       const index = parseInt(text) - 1;
       const listings = session.listings || [];
-
       if (isNaN(index) || index < 0 || index >= listings.length) {
         await message.reply(`Please reply with a number between 1 and ${listings.length}`);
         return;
       }
-
-      const chosen = listings[index];
-      setSession(userId, { step: 'choose_visit', chosenListing: chosen });
+      setSession(userId, { step: 'choose_visit', chosenListing: listings[index] });
       await message.reply(msg.askVisitSlot());
       return;
     }
 
-    // ── STEP: choose_visit → Confirm & notify agent ───
+    // ── STEP: choose_visit → Confirm + Notify + Schedule reminder ─
     if (session.step === 'choose_visit') {
       const slot = visitSlots[text];
       if (!slot) { await message.reply(msg.invalidInput()); return; }
 
       const listing = session.chosenListing!;
-      const budget = `₹${session.minBudget?.toLocaleString()} – ₹${session.maxBudget?.toLocaleString()}`;
+      const budget = `\u20b9${session.minBudget?.toLocaleString()} \u2013 \u20b9${session.maxBudget?.toLocaleString()}`;
 
       // 1. Confirm to customer
       await message.reply(msg.visitConfirmed(listing, slot));
@@ -141,7 +148,7 @@ client.on('message', async (message: Message) => {
         timestamp: new Date().toLocaleString('en-IN'),
       });
 
-      // 3. Notify agent on WhatsApp
+      // 3. Notify assigned agent on WhatsApp
       const agentNumber = listing.agentNumber || config.defaultAgentNumber;
       if (agentNumber) {
         await client.sendMessage(
@@ -150,16 +157,19 @@ client.on('message', async (message: Message) => {
         );
       }
 
+      // 4. Schedule follow-up reminder for customer
+      scheduleReminder(userId, listing, slot);
+
       clearSession(userId);
       return;
     }
 
-    // ── Default: prompt to start ───────────────────────
-    await message.reply(`Type *hi* to start searching for properties! 👋`);
+    // ── Default ───────────────────────────────────────────────────
+    await message.reply(`Type *hi* to start searching! ${config.businessLogo}`);
 
   } catch (error) {
     console.error('Bot error:', error);
-    await message.reply('⚠️ Something went wrong. Please type *hi* to try again.');
+    await message.reply('\u26a0\ufe0f Something went wrong. Please type *hi* to try again.');
     clearSession(userId);
   }
 });

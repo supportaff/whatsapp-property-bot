@@ -2,51 +2,88 @@ import { config } from './config';
 import { Listing } from './sheets';
 
 export const msg = {
-  welcome: () =>
-    `👋 Welcome to *${config.businessName}*!\n\nI'll help you find the perfect property in seconds. 🏠🚗\n\nWhat are you looking for?\n\n1️⃣ Real Estate (Flat / House / Plot)\n2️⃣ Car\n\nReply with *1* or *2*`,
+  welcome: () => {
+    const types = config.businessTypes
+      .map((t, i) => `${i + 1}\ufe0f\u20e3 ${t}`)
+      .join('\n');
+    return (
+      `${config.businessLogo} Welcome to *${config.businessName}*!\n` +
+      `_${config.businessTagline}_\n\n` +
+      `I'll help you find the perfect listing in seconds. \u23f1\ufe0f\n\n` +
+      `What are you looking for?\n\n${types}\n\n` +
+      `Reply with a number (1\u2013${config.businessTypes.length})`
+    );
+  },
 
-  chooseLocation: () =>
-    `📍 Which area do you prefer?\n\n1️⃣ Anna Nagar\n2️⃣ OMR\n3️⃣ Velachery\n4️⃣ Porur\n5️⃣ Tambaram\n6️⃣ Any Location\n\nReply with a number (1–6)`,
+  chooseLocation: () => {
+    const locs = config.businessLocations
+      .map((l, i) => `${i + 1}\ufe0f\u20e3 ${l}`)
+      .join('\n');
+    const anyNum = config.businessLocations.length + 1;
+    return `\ud83d\udccd Which area in *${config.businessCity}* do you prefer?\n\n${locs}\n${anyNum}\ufe0f\u20e3 Any Location\n\nReply with a number`;
+  },
 
   askMinBudget: () =>
-    `💰 What is your *minimum budget* in ₹?\n\nType a number, e.g.\n• *500000* for ₹5 Lakhs\n• *2000000* for ₹20 Lakhs`,
+    `\ud83d\udcb0 What is your *minimum budget* in \u20b9?\n\nType a number, e.g.\n\u2022 *500000* for \u20b95 Lakhs\n\u2022 *2000000* for \u20b920 Lakhs`,
 
   askMaxBudget: () =>
-    `💰 And your *maximum budget* in ₹?`,
+    `\ud83d\udcb0 And your *maximum budget* in \u20b9?`,
 
   searching: () =>
-    `🔍 Searching listings for you... Please wait a moment.`,
+    `\ud83d\udd0d Searching listings for you... Please wait.`,
 
   noResults: (min: number, max: number) =>
-    `😔 No listings found between *₹${min.toLocaleString()}* and *₹${max.toLocaleString()}* in your preferred area.\n\nType *hi* to search again with different criteria.`,
+    `\ud83d\ude14 No listings found between *\u20b9${min.toLocaleString()}* and *\u20b9${max.toLocaleString()}* in your preferred area.\n\nType *hi* to search again with different criteria.`,
 
   results: (listings: Listing[]) => {
-    let text = `✅ Found *${listings.length} listing${listings.length > 1 ? 's' : ''}* matching your budget:\n\n`;
+    let text = `\u2705 Found *${listings.length} listing${listings.length > 1 ? 's' : ''}* matching your budget:\n\n`;
     listings.forEach((item, i) => {
-      text += `*${i + 1}️⃣ ${item.title}*\n`;
-      text += `📍 ${item.location}\n`;
-      text += `💵 ₹${item.price.toLocaleString()}\n`;
-      text += `📋 ${item.details}\n`;
-      text += `👤 Agent: ${item.agentName} | 📞 ${item.agentNumber.replace('@c.us', '')}\n\n`;
+      text += `*${i + 1}\ufe0f\u20e3 ${item.title}*\n`;
+      text += `\ud83d\udccd ${item.location}\n`;
+      text += `\ud83d\udcb5 \u20b9${item.price.toLocaleString()}\n`;
+      text += `\ud83d\udccb ${item.details}\n`;
+      text += `\ud83d\udc64 Agent: ${item.agentName} | \ud83d\udcde ${item.agentNumber.replace('@c.us', '')}\n\n`;
     });
-    text += `👉 Interested in a *site visit*? Reply with the listing number (e.g. *1*, *2*, *3*)\n\nOr type *hi* to search again.`;
+    text += `\ud83d\udc49 Interested in a *site visit*? Reply with the listing number (e.g. *1*, *2*)\n\nOr type *hi* to search again.`;
     return text;
   },
 
   askVisitSlot: () =>
-    `📅 When would you like to visit?\n\n1️⃣ Tomorrow 10 AM\n2️⃣ Tomorrow 3 PM\n3️⃣ This Saturday 11 AM\n4️⃣ This Sunday 11 AM\n\nReply with 1, 2, 3, or 4`,
+    `\ud83d\udcc5 When would you like to visit?\n\n1\ufe0f\u20e3 Tomorrow 10 AM\n2\ufe0f\u20e3 Tomorrow 3 PM\n3\ufe0f\u20e3 This Saturday 11 AM\n4\ufe0f\u20e3 This Sunday 11 AM\n\nReply with 1, 2, 3, or 4`,
 
   visitConfirmed: (listing: Listing, slot: string) =>
-    `✅ *Visit Confirmed!*\n\n🏠 Property: ${listing.title}\n📍 Location: ${listing.location}\n📅 Date & Time: ${slot}\n👤 Agent: ${listing.agentName}\n📞 ${listing.agentNumber.replace('@c.us', '')} will meet you there.\n\nWe'll send you a reminder the evening before. 🙏\n\nType *hi* to search for more properties.`,
+    `\u2705 *Visit Confirmed!*\n\n` +
+    `${config.businessLogo} *${config.businessName}*\n\n` +
+    `\ud83c\udfe0 Property: ${listing.title}\n` +
+    `\ud83d\udccd Location: ${listing.location}\n` +
+    `\ud83d\udcc5 Date & Time: ${slot}\n` +
+    `\ud83d\udc64 Agent: ${listing.agentName}\n` +
+    `\ud83d\udcde ${listing.agentNumber.replace('@c.us', '')} will meet you there.\n\n` +
+    `\u23f0 You will receive a reminder before your visit.\n\n` +
+    (config.businessWebsite ? `\ud83c\udf10 ${config.businessWebsite}\n` : '') +
+    `\nType *hi* to search for more properties.`,
+
+  visitReminder: (listing: Listing, slot: string) =>
+    `\u23f0 *Visit Reminder!*\n\n` +
+    `${config.businessLogo} *${config.businessName}*\n\n` +
+    `This is a friendly reminder about your upcoming site visit:\n\n` +
+    `\ud83c\udfe0 *${listing.title}*\n` +
+    `\ud83d\udccd ${listing.location}\n` +
+    `\ud83d\udcc5 ${slot}\n` +
+    `\ud83d\udc64 Agent: ${listing.agentName} – ${listing.agentNumber.replace('@c.us', '')}\n\n` +
+    `See you there! \ud83d\ude4f If you need to reschedule, type *hi*.`,
 
   agentAlert: (phone: string, listing: Listing, slot: string, budget: string) =>
-    `🔔 *New Lead Alert — ${config.businessName}*\n\n👤 Customer: ${phone}\n🏠 Interested In: ${listing.title}\n📍 ${listing.location}\n💰 Budget: ${budget}\n📅 Site Visit: ${slot}\n\n_Reply directly to the customer on WhatsApp._`,
+    `\ud83d\udd14 *New Lead Alert \u2014 ${config.businessName}*\n\n` +
+    `\ud83d\udc64 Customer: +${phone}\n` +
+    `\ud83c\udfe0 Interested In: ${listing.title}\n` +
+    `\ud83d\udccd ${listing.location}\n` +
+    `\ud83d\udcb0 Budget: ${budget}\n` +
+    `\ud83d\udcc5 Site Visit: ${slot}\n\n` +
+    `_Contact the customer directly on WhatsApp or call them._`,
 
   invalidInput: () =>
-    `❌ I didn't understand that. Please reply with one of the options shown above.`,
-
-  restart: () =>
-    `🔄 Let's start over! Type *hi* to begin a new search.`,
+    `\u274c I didn't understand that. Please reply with one of the options shown above.`,
 };
 
 export const visitSlots: Record<string, string> = {
@@ -56,16 +93,21 @@ export const visitSlots: Record<string, string> = {
   '4': 'This Sunday 11:00 AM',
 };
 
-export const locationMap: Record<string, string> = {
-  '1': 'anna nagar',
-  '2': 'omr',
-  '3': 'velachery',
-  '4': 'porur',
-  '5': 'tambaram',
-  '6': 'any',
-};
+// Dynamically build location map from config
+export function getLocationMap(): Record<string, string> {
+  const map: Record<string, string> = {};
+  config.businessLocations.forEach((loc, i) => {
+    map[String(i + 1)] = loc.toLowerCase();
+  });
+  map[String(config.businessLocations.length + 1)] = 'any';
+  return map;
+}
 
-export const typeMap: Record<string, string> = {
-  '1': 'real estate',
-  '2': 'car',
-};
+// Dynamically build type map from config
+export function getTypeMap(): Record<string, string> {
+  const map: Record<string, string> = {};
+  config.businessTypes.forEach((type, i) => {
+    map[String(i + 1)] = type.toLowerCase();
+  });
+  return map;
+}
